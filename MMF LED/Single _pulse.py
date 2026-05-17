@@ -2,13 +2,13 @@
 
 WDM in a MMF
 
-Single LED channel, step-index MM
+Single LED channel, step-index MM, Single pulse
 
 """
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from scipy.special import erfc
+from scipy.special import erfc # type: ignore
 
 
 c = 3e8
@@ -70,6 +70,5 @@ plt.legend
 
 plt.grid()
 plt.show()
-
 
 
