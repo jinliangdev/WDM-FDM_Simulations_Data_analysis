@@ -35,9 +35,9 @@ def plot_multiple_pulse():
 
 def plot_single_bit_error_rate():
     ber, results = bit_rate_error.calculate_bit_error_rate(
-        cable_length_km=500,
+        cable_length_km=100,
         wavelength_nm=850,
-        pulse_sigma_ns=0.03,
+        pulse_sigma_ns=0.015,
         duration_ns=50,
         bit_rate_Gbps=3,
         peak_intensity=1.0,
@@ -50,14 +50,14 @@ def plot_single_bit_error_rate():
     )
 
 def plot_heatmap():
-        cable_lengths_km = np.linspace(10, 400, 40)
-        bit_rates_Gbps = np.linspace(1, 10, 40)
+        cable_lengths_km = np.linspace(10, 400, 20)
+        bit_rates_Gbps = np.linspace(1, 10, 20)
 
         wavelength_nm = 850
-        pulse_sigma_ns = 0.03
+        pulse_sigma_ns = 0.01
         duration_ns = 50
         peak_intensity = 1.0
-        seed = 67
+        seed = 2
         samples_per_bit = 512
         pad_bits = 30
         remove_group_delay = True
@@ -97,6 +97,6 @@ def plot_heatmap():
 
 #plot_heatmap()
 
-plot_single_bit_error_rate()
+#plot_single_bit_error_rate()
 
 #plot_multiple_pulse()

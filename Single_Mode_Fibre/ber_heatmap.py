@@ -157,13 +157,13 @@ def plot_ber_heatmap_with_values(
 if __name__ == "__main__":
 
     cable_lengths_km = np.linspace(10, 200, 20)
-    bit_rates_Gbps = np.linspace(1, 10, 10)
+    bit_rates_Gbps = np.linspace(1, 10, 20)
 
     wavelength_nm = 850
     pulse_sigma_ns = 0.03
     duration_ns = 100
     peak_intensity = 1.0
-    seed = 67
+    seed = 1
     samples_per_bit = 512
     pad_bits = 30
     remove_group_delay = True
