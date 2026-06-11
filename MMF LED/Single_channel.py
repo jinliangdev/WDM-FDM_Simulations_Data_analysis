@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from scipy.special import erfc
 import random
-import Dispersion as spd # custom module to calculate the modal and chromatic dispersion
 
 
 c = 3e8
@@ -22,7 +21,7 @@ D_material = -80e-12 / (1e-9 * 1e3)
 L = 7500
 
 #defining source
-lambda0 = 625e-9
+lambda0 = 850e-9
 delta_lambda = 40e-9
 sigma_input = 15e-9
 
@@ -31,6 +30,24 @@ Nbits = 50
 ppb = 100
 data = [random.randint(0,1) for i in range(Nbits)]
 
+
+def modal_dispersion(n1, n2, L):
+    #numerical aperture calculates the range of angles/modes the fibre accepts
+    #larger NA means more modes means greater spread
+    NA = np.sqrt(n1**2 - n2**2)
+    #maximum delay between fastest and slowest path per unit length.
+    delta_tau_per_L = NA**2 / (2*n1*c)
+    #converts the worst case delay into a RMS pulse width
+    sigma_modal = (delta_tau_per_L * L) / (2 * np.sqrt(3))
+    return sigma_modal
+    
+
+def chromatic_dispersion(D_material, delta_lambda, L):
+    #converts the assumed LED spectral bandwidth to a gaussian width
+    #This assumes that the pulse from led emission is approximately gaussian
+    sigma_lambda = delta_lambda / (2 * np.sqrt(2 * np.log(2))) # spread due to spectral bandwidth since LED has assumed difference in wavelengths
+    sigma_chrom = np.abs(D_material) * L * sigma_lambda
+    return sigma_chrom
 
 #calculating the bit error rate
 def compute_BER(t, signal, data, T, sigma_output):
@@ -69,8 +86,8 @@ def gaussian_pulse(t, sigma, centre = 0):
 # modal dispersion - due to different modes arriving at different times
 # chromatic dispersion - due to different wavelengths travelling at different speeds
 # input - finite input pulse width from LED driver
-sigma_output = np.sqrt(spd.modal_dispersion(n1, n2, L)**2 +
-                       spd.chromatic_dispersion(D_material,delta_lambda, L)**2 +
+sigma_output = np.sqrt(modal_dispersion(n1, n2, L)**2 +
+                       chromatic_dispersion(D_material,delta_lambda, L)**2 +
                        sigma_input**2)
 
 
@@ -82,8 +99,8 @@ BER_grid = np.zeros((len(L_sweep), len(f_sweep)))
 
 for i, L in enumerate(L_sweep):
     # recompute sigma_output for this length
-    sig_out = np.sqrt(spd.modal_dispersion(n1, n2, L)**2 + 
-                      spd.chromatic_dispersion(D_material, delta_lambda, L)**2 + 
+    sig_out = np.sqrt(modal_dispersion(n1, n2, L)**2 + 
+                      chromatic_dispersion(D_material, delta_lambda, L)**2 + 
                       sigma_input**2)
     
     for j, f in enumerate(f_sweep):
@@ -103,8 +120,8 @@ for i, L in enumerate(L_sweep):
     #this is the maximum useable bit rate, above this frequency, pulses start to overlap enough to start increasing BER
     #this represents the good and bad regioins
     f_error_curve = np.array([
-        0.6 / np.sqrt(spd.modal_dispersion(n1, n2, Lv)**2 +
-                    spd.chromatic_dispersion(D_material, delta_lambda, Lv)**2 +
+        0.6 / np.sqrt(modal_dispersion(n1, n2, Lv)**2 +
+                    chromatic_dispersion(D_material, delta_lambda, Lv)**2 +
                     sigma_input**2)
         for Lv in L_sweep])
 
