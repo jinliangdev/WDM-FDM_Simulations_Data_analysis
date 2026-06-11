@@ -1,0 +1,259 @@
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+from scipy.fft import rfft, rfftfreq
+from scipy.special import erfc
+
+#style choices to create nice looking figures
+matplotlib.rcParams.update({
+    'font.family':      'Times New Roman',
+    'font.size':        10,
+    'axes.titlesize':   11,
+    'axes.labelsize':   10,
+    'xtick.labelsize':  9,
+    'ytick.labelsize':  9,
+    'legend.fontsize':  9,
+    'axes.linewidth':   0.8,
+    'xtick.direction':  'in',
+    'ytick.direction':  'in',
+    'xtick.top':        True,
+    'ytick.right':      True,
+    'figure.dpi':       150,
+})
+
+#root directory for all oscilloscope exports
+BASE = "FDM DA/Data"
+
+#fdm carrier frequencies for each channel
+#these are chosen to be non-harmonically related
+carriers = {'Green': 1000, 'Red': 1300, 'Blue': 1700}
+# colour and marker styles
+ch_color = {'Green': '#2ca02c', 'Red': '#d62728', 'Blue': '#1f77b4'}
+ch_marker = {'Green': 'o', 'Red': 's', 'Blue': '^'}
+
+# ── data loading ──────────────────────────────────────────────────────────────
+
+def load_fft(fname):
+    path = f"{BASE}/{fname}.CSV"
+    t, V = np.loadtxt(path, delimiter=",", skiprows=1, unpack=True)
+    #find interval between samples
+    dt = np.median(np.diff(t))
+    N = len(V)
+    # frequencies axis for the FFT
+    freqs = rfftfreq(N, d=dt)
+    # one sided linear amplitudes
+    amp_lin = np.abs(rfft(V)) * 2 / N
+    #folded into negative frequncy half, then normalised with 0dB as peak, adding a small
+    #1e-12 to prevent log(0)
+    amp_db  = 20 * np.log10(amp_lin / amp_lin.max() + 1e-12)
+    return freqs, amp_lin, amp_db
+
+def peak_amp(freqs, amp, f0, bw=80):
+    #returns the max amplitude within 160 hz around the peak amplitude
+    #This window isolates the carrier from the noise floor, and adjacent channels.
+
+    mask = (freqs >= f0 - bw) & (freqs <= f0 + bw)
+    return amp[mask].max()
+
+def noise_floor(freqs, amp):
+    #Estimates the noise floor as the medium amplitude away from carriers
+    #the median is used rather than mean to be robust in case of spurious spikes in spectrum
+    mask = np.ones(len(freqs), bool)
+    for f in carriers.values():
+        mask &= (np.abs(freqs - f) > 200)
+    mask &= (freqs > 200) & (freqs < 5000) # high freq rolloff
+    return np.median(amp[mask])
+
+def snr_linear(freqs, amp, f0):
+    #returns the SNR
+    sig = peak_amp(freqs, amp, f0)
+    nf  = noise_floor(freqs, amp)
+    return sig / nf
+
+def ber_from_snr(snr_lin):
+    # computes the theoretical BER from a linear SNR
+    # for OOK systems, BER is
+    #where SNR is amplitude ratio.
+    return 0.5 * erfc(snr_lin / np.sqrt(2))
+
+# preload all files
+
+raw = {}
+for fname in ['FDMGN','FDMRN','FDMBN','FDMN','FDMRGN','FDMRBN','FDMGBN']:
+    raw[fname] = load_fft(fname)
+
+solo = {'Green': 'FDMGN', 'Red': 'FDMRN', 'Blue': 'FDMBN'}
+# files were two channels on 1 channel off, to quantify crosstalk, xt
+xt   = {'Green': 'FDMRBN', 'Red': 'FDMGBN', 'Blue': 'FDMRGN'}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIGURE 1  Single channel
+# ─────────────────────────────────────────────────────────────────────────────
+
+fig1, axes = plt.subplots(3, 1, figsize=(7, 7), sharex=True)
+fig1.subplots_adjust(hspace=0.08, top=0.93, bottom=0.09, left=0.11, right=0.97)
+fig1.suptitle('Single-Channel Baselines', fontweight='bold')
+
+for ax, (ch, fname) in zip(axes, solo.items()):
+    freqs, amp_lin, amp_db = raw[fname]
+    fc = carriers[ch]
+    color = ch_color[ch]
+
+    #set limit of 0-5khz
+
+    mask = freqs <= 5000
+    ax.plot(freqs[mask] / 1000, amp_db[mask], color='#333333', linewidth=0.7, zorder=2)
+
+    # shade carrier peak
+    bw = 0.15  # kHz shading half-width to visually highlight the signal bin
+    peak_mask = mask & (freqs >= fc - 150) & (freqs <= fc + 150)
+    ax.fill_between(freqs[peak_mask]/1000, amp_db[peak_mask], -120,
+                    color=color, alpha=0.25, zorder=1)
+    ax.axvline(fc/1000, color=color, linewidth=1.0, linestyle='--', zorder=3)
+
+    #compute and annotate the SNR AND BER for this channel
+    snr_lin_val = snr_linear(freqs, amp_lin, fc)
+    snr_db_val  = 20 * np.log10(snr_lin_val)
+    ber_val     = ber_from_snr(snr_lin_val)
+    peak_db     = peak_amp(freqs, amp_db, fc, bw=80)  # normalised will be about 0
+
+    ax.annotate(
+        f'{ch}  |  {fc/1000:.1f} kHz  |  SNR = {snr_db_val:.1f} dB  |  BER < 10$^{{-15}}$',
+        xy=(fc/1000, 0), xytext=(fc/1000 + 0.25, -18),
+        color=color, fontsize=9, fontweight='bold',
+        arrowprops=dict(arrowstyle='->', color=color, lw=0.8),
+    )
+
+    ax.set_ylabel('Norm. amplitude (dB)')
+    ax.set_ylim(-100, 10)
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(20))
+    ax.grid(True, linewidth=0.4, color='#cccccc', linestyle=':')
+
+axes[-1].set_xlabel('Frequency (kHz)')
+axes[-1].set_xlim(0, 5)
+
+fig1.savefig('FDM DA/fdm_fig1_baselines.pdf', bbox_inches='tight')
+fig1.savefig('FDM DA/fdm_fig1_baselines.png', dpi=200, bbox_inches='tight')
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIGURE 2 - all channels on
+# ─────────────────────────────────────────────────────────────────────────────
+
+fig2, (ax_spec, ax_bar) = plt.subplots(1, 2, figsize=(11, 4.5),
+                                        gridspec_kw={'width_ratios': [2, 1]})
+fig2.subplots_adjust(wspace=0.35, top=0.88, bottom=0.13, left=0.08, right=0.97)
+fig2.suptitle('FDM System Performance - All Channels Active', fontweight='bold')
+
+# all channels on
+freqs_a, amp_lin_a, amp_db_a = raw['FDMN']
+mask = freqs_a <= 5000
+ax_spec.plot(freqs_a[mask]/1000, amp_db_a[mask], color='#333333', linewidth=0.7, zorder=2)
+
+for ch, fc in carriers.items():
+    color = ch_color[ch]
+    peak_mask = mask & (freqs_a >= fc - 150) & (freqs_a <= fc + 150)
+    ax_spec.fill_between(freqs_a[peak_mask]/1000, amp_db_a[peak_mask], -120,
+                         color=color, alpha=0.25, zorder=1)
+    ax_spec.axvline(fc/1000, color=color, linewidth=1.0, linestyle='--', zorder=3)
+
+    #annnotate each carrier with its SNR 
+    snr_lin_val = snr_linear(freqs_a, amp_lin_a, fc)
+    snr_db_val  = 20 * np.log10(snr_lin_val)
+    ax_spec.text(fc/1000, 2, f'{ch}\n{snr_db_val:.0f} dB',
+                 ha='center', va='bottom', color=color, fontsize=8.5, fontweight='bold')
+
+ax_spec.set_xlabel('Frequency (kHz)')
+ax_spec.set_ylabel('Norm. amplitude (dB)')
+ax_spec.set_xlim(0, 5)
+ax_spec.set_ylim(-100, 10)
+ax_spec.yaxis.set_major_locator(ticker.MultipleLocator(20))
+ax_spec.grid(True, linewidth=0.4, color='#cccccc', linestyle=':')
+ax_spec.set_title('FFT Spectrum', fontsize=10)
+
+#crosstalk quantification
+iso_vals = {}
+for ch in ['Green', 'Red', 'Blue']:
+    fc = carriers[ch]
+    freqs_xt, amp_xt, _ = raw[xt[ch]]
+    freqs_s,  amp_s,  _ = raw[solo[ch]]
+    xt_amp  = peak_amp(freqs_xt, amp_xt, fc)
+    sig_amp = peak_amp(freqs_s,  amp_s,  fc)
+    iso_vals[ch] = -20 * np.log10(xt_amp / sig_amp)   # positive = isolation
+
+chs = list(iso_vals.keys())
+vals = [-iso_vals[c] for c in chs]   # 0 dB = fully active, more negative = cleaner
+colors = [ch_color[c] for c in chs]
+bars = ax_bar.bar(chs, vals, color=colors, alpha=0.75, edgecolor='#333333', linewidth=0.7, width=0.5)
+for bar, v in zip(bars, vals):
+    ax_bar.text(bar.get_x() + bar.get_width()/2, v - 1.5,
+                f'{v:.1f} dB', ha='center', va='top', fontsize=9, fontweight='bold', color='white')
+
+ax_bar.axhline(0, color='#333333', linewidth=0.8)
+ax_bar.set_ylabel('Crosstalk (dB)')
+ax_bar.set_title('FDM Channel Crosstalk\n(0 dB = fully active)', fontsize=10)
+ax_bar.set_ylim(-80, 0)
+ax_bar.yaxis.set_major_locator(ticker.MultipleLocator(10))
+ax_bar.grid(True, axis='y', linewidth=0.4, color='#cccccc', linestyle=':')
+ax_bar.tick_params(axis='x', which='both', bottom=False)
+
+fig2.savefig('FDM DA/fdm_fig2_allon_isolation.pdf', bbox_inches='tight')
+fig2.savefig('FDM DA/fdm_fig2_allon_isolation.png', dpi=200, bbox_inches='tight')
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIGURE 3 - SNR and BER summary table figure
+# ─────────────────────────────────────────────────────────────────────────────
+
+fig3, ax = plt.subplots(figsize=(7.5, 2.8))
+fig3.subplots_adjust(top=0.82, bottom=0.05, left=0.02, right=0.98)
+fig3.suptitle('Channel Performance Summary', fontweight='bold')
+ax.axis('off')
+
+col_labels = ['Channel', 'Carrier\nFreq. (kHz)', 'Signal\nAmplitude (mV)',
+              'Noise Floor\n(µV)', 'SNR (dB)', 'BER']
+rows = []
+for ch in ['Green', 'Red', 'Blue']:
+    fc = carriers[ch]
+    freqs_s, amp_s, _ = raw[solo[ch]]
+    sig  = peak_amp(freqs_s, amp_s, fc)
+    nf   = noise_floor(freqs_s, amp_s)
+    snr  = sig / nf
+    ber  = ber_from_snr(snr)
+    snr_db = 20 * np.log10(snr)
+    ber_str = f'< 10⁻¹⁵' if ber < 1e-15 else f'{ber:.2e}'
+    rows.append([ch, f'{fc/1000:.1f}', f'{sig*1000:.2f}', f'{nf*1e6:.1f}', f'{snr_db:.1f}', ber_str])
+
+table = ax.table(
+    cellText=rows,
+    colLabels=col_labels,
+    cellLoc='center',
+    loc='center',
+    bbox=[0, 0, 1, 1],
+)
+table.auto_set_font_size(False)
+table.set_fontsize(10)
+
+# style header
+for j in range(len(col_labels)):
+    cell = table[0, j]
+    cell.set_facecolor('#2c3e50')
+    cell.set_text_props(color='white', fontweight='bold')
+    cell.set_edgecolor('#aaaaaa')
+    cell.set_linewidth(0.5)
+
+# style data rows
+row_colors = {'Green': '#e8f5e9', 'Red': '#ffebee', 'Blue': '#e3f2fd'}
+for i, ch in enumerate(['Green', 'Red', 'Blue'], start=1):
+    for j in range(len(col_labels)):
+        cell = table[i, j]
+        cell.set_facecolor(row_colors[ch])
+        cell.set_edgecolor('#aaaaaa')
+        cell.set_linewidth(0.5)
+        if j == 0:
+            cell.set_text_props(color=ch_color[ch], fontweight='bold')
+
+fig3.savefig('FDM DA/fdm_fig3_performance_table.pdf', bbox_inches='tight')
+fig3.savefig('FDM DA/fdm_fig3_performance_table.png', dpi=200, bbox_inches='tight')
+
+print("All three figures saved.")
+plt.show()
